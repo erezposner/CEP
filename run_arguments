@@ -1,0 +1,1 @@
+--dataroot /home/algo/Data/cep/OC_VC --model cltsgan --model cltsgancombinedintuitive --name "cltsgan_model_name" --ngf 80 --num_threads=4 --dataset_mode=unalignedintu
