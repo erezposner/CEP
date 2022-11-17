@@ -31,7 +31,19 @@ def make_dataset(dir, max_dataset_size=float("inf")):
                 images.append(path)
     return images[:min(max_dataset_size, len(images))]
 
+def make_dataset_from_csv(csv,max_dataset_size=float("inf")):
+    import pandas as pd
 
+    images = []
+
+    cs = pd.read_csv(csv)
+    rows = list(cs.frame_path)
+    rows = rows[:min(max_dataset_size, len(rows))]
+    for i in range(len(rows)):
+        fname = rows[i]
+        if is_image_file(fname):
+            images.append(fname)
+    return images
 def default_loader(path):
     return Image.open(path).convert('RGB')
 
