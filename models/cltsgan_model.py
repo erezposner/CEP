@@ -238,8 +238,8 @@ class CLTSGANModel(BaseModel):
 
 
 
-        self.loss_noiseB_n  = self.criterionVec(self.nrec_B,self.nreal_B) * lambda_B ##/2
-        self.loss_noiseB_t  = self.criterionVec(self.trec_B,self.treal_B) * lambda_B ##/2
+        self.loss_noiseB_n  = self.criterionVec(self.nrec_B,self.nreal_B) * lambda_B /2
+        self.loss_noiseB_t  = self.criterionVec(self.trec_B,self.treal_B) * lambda_B /2
         self.loss_noiseB = self.loss_noiseB_n + self.loss_noiseB_t 
 
 
