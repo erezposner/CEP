@@ -115,7 +115,7 @@ class CLTSGANCombinedIntuitiveModel(BaseModel):
         input = combined_input[0]
         self.real_A = input['A' if AtoB else 'B'].to(self.device)
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
-        self.image_paths = input['A_paths' if AtoB else 'B_paths']
+        self.image_paths = input['B_paths']#'A_paths' if AtoB else 'B_paths']
 
 
 
@@ -135,6 +135,8 @@ class CLTSGANCombinedIntuitiveModel(BaseModel):
 
 
         self.fake_B, self.nfake_B, self.tfake_B = self.netG_A(self.real_A)  # G_A(A)
+        # self.rec_A = self.netG_B(self.fake_B.expand([4, 3, 256, 256]), self.nfake_B.expand([4, 1, 128]),
+        #                          self.tfake_B.expand([4, 12, 64, 64]))  # G_B(G_A(A))
 
         self.rec_A   = self.netG_B(self.fake_B, self.nfake_B, self.tfake_B)   # G_B(G_A(A))
         self.rec_At  = self.netG_B(self.fake_B, self.nreal_B, self.treal_B)   # G_B(G_A(A))
@@ -241,8 +243,8 @@ class CLTSGANCombinedIntuitiveModel(BaseModel):
 
 
 
-        self.loss_noiseB_n  = self.criterionVec(self.nrec_B,self.nreal_B) * lambda_B ##/2
-        self.loss_noiseB_t  = self.criterionVec(self.trec_B,self.treal_B) * lambda_B ##/2
+        self.loss_noiseB_n  = self.criterionVec(self.nrec_B,self.nreal_B) * lambda_B /2
+        self.loss_noiseB_t  = self.criterionVec(self.trec_B,self.treal_B) * lambda_B /2
         self.loss_noiseB = self.loss_noiseB_n + self.loss_noiseB_t 
 
 
