@@ -4,3 +4,4 @@ datasets/*
 *.png
 */*.pyc
 */**/__pycache__
+/model_zoo/

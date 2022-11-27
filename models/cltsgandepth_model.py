@@ -1,13 +1,15 @@
 #THIS IS THE ONE WITH THE SINGLE CYCLE DISCRIMINATOR!!!
 import torch
 import itertools
+
+from newcrfs.networks.NewCRFDepth import NewCRFDepth
 from util.image_pool import ImagePool
 from .base_model import BaseModel
 from . import networks
 from torchvision import transforms
 
 
-class CLTSGANModel(BaseModel):
+class CLTSGANdepthModel(BaseModel):
     """
     This class implements the XDCycleGAN model, for learning a one-to-many image-to-image translation without paired data.
 
@@ -40,9 +42,21 @@ class CLTSGANModel(BaseModel):
             opt (Option class)-- stores all the experiment flags; needs to be a subclass of BaseOptions
         """
         BaseModel.__init__(self, opt)
+        self.model_depth = NewCRFDepth(version='large07', inv_depth=False, max_depth=10, pretrained='model_zoo/swin_transformer/swin_large_patch4_window7_224_22k.pth')
+        self.epoch = 0
+        self.loss_depth = 0
+        self.model_depth.train()
+        self.model_depth = torch.nn.DataParallel(self.model_depth,device_ids=[self.device])
+        self.model_depth.cuda(self.device)
+        # self.optimizer_depth = torch.optim.Adam([{'params': self.model_depth.parameters()}],
+        #                              lr=2e-5)
+        self.start_depth_pred_at_epoch = 100
+        self.abs_rel_clip = 0.05
+
+        # self.check = True
         # specify the training losses you want to print out. The training/test scripts will call <BaseModel.get_current_losses>
         self.loss_names = ['G_A', 'cycle_A', 'idt_A', 'D_B', 'G_B', 'cycle_B', "D_A", "noiseA", "noiseB_n","noiseB_t", 'idt_B', 'G_Brec', "D_Brec"]
-        
+
         # specify the images you want to save/display. The training/test scripts will call <BaseModel.get_current_visuals>
         visual_names_A = ['real_A', 'fake_B', 'rec_A',"rec_At"]
         visual_names_B = ['real_B', 'fake_A','fake_At', 'fake_A2', 'rec_B']
@@ -90,10 +104,11 @@ class CLTSGANModel(BaseModel):
             self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)  # define GAN loss.
             self.criterionCycle = torch.nn.L1Loss()
             self.criterionIdt = torch.nn.L1Loss()
+            self.depthL1 = torch.nn.L1Loss()
             self.criterionVec = torch.nn.L1Loss()
 
             # initialize optimizers; schedulers will be automatically created by function <BaseModel.setup>.
-            self.optimizer_G = torch.optim.Adam(itertools.chain(self.netG_A.parameters(), self.netG_B.parameters()), lr=opt.lr, betas=(opt.beta1, 0.999))
+            self.optimizer_G = torch.optim.Adam(itertools.chain(self.netG_A.parameters(), self.netG_B.parameters(), self.model_depth.parameters()), lr=opt.lr, betas=(opt.beta1, 0.999))
             self.optimizer_D = torch.optim.Adam(itertools.chain(self.netD_B.parameters(),self.netD_A.parameters(), self.netD_Brec.parameters()), lr=opt.lr, betas=(opt.beta1, 0.999))
 
 
@@ -112,6 +127,7 @@ class CLTSGANModel(BaseModel):
         AtoB = self.opt.direction == 'AtoB'
         self.real_A = input['A' if AtoB else 'B'].to(self.device)
         self.real_B = input['B' if AtoB else 'A'].to(self.device)
+        self.real_C = input['C']['depth'].to(self.device)
         self.image_paths = input['A_paths' if AtoB else 'B_paths']
 
 
@@ -120,6 +136,13 @@ class CLTSGANModel(BaseModel):
 
     def forward(self):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
+
+        if 'fake_A_depth' not in self.visual_names and self.epoch > self.start_depth_pred_at_epoch:
+            self.visual_names.append('real_C')
+            self.visual_names.append('fake_A_depth')
+            self.visual_names.append('depth_abs_rel')
+            self.loss_names.append("depth")
+            self.loss_names.append("mean_depth_abs_rel")
 
 
         self.nreal_B = torch.rand(self.real_A.shape[0],1,128).to(self.real_A.device)
@@ -145,6 +168,7 @@ class CLTSGANModel(BaseModel):
 
 
         self.rec_B, self.nrec_B, self.trec_B = self.netG_A(self.fake_A)   # G_A(G_B(B))
+        self.fake_A_depth = self.model_depth(self.fake_A)
 
 
 
@@ -192,6 +216,12 @@ class CLTSGANModel(BaseModel):
         fake_B = self.fake_B_pool.query(self.fake_B)
         self.loss_D_A = self.backward_D_basic(self.netD_A, self.real_B, fake_B)
 
+    def backward_depth(self):
+        self.loss_depth = self.depthL1(self.fake_A_depth, self.real_C)
+        depth_abs_rel = torch.abs(self.fake_A_depth - self.real_C) / self.real_C
+        self.loss_mean_depth_abs_rel = torch.mean(depth_abs_rel)
+        depth_abs_rel = torch.clamp(depth_abs_rel, 0, self.abs_rel_clip)
+        self.depth_abs_rel = depth_abs_rel / self.abs_rel_clip * 2 - 1
 
     def backward_G(self):
 
@@ -251,19 +281,28 @@ class CLTSGANModel(BaseModel):
 
 
         # combined loss and calculate gradients#
-        self.loss_G = (self.loss_G_A  + self.loss_G_B + self.loss_G_Brec) * 2  + self.loss_cycle_A + self.loss_cycle_B + self.loss_idt_A + self.loss_idt_B + self.loss_noiseB + self.loss_noiseA
+        self.loss_G = (self.loss_G_A + self.loss_G_B + self.loss_G_Brec) * 2 + self.loss_cycle_A + self.loss_cycle_B + self.loss_idt_A + self.loss_idt_B + self.loss_noiseB + self.loss_noiseA
+        if self.epoch > self.start_depth_pred_at_epoch:
+            self.loss_G += (self.loss_depth*0.01)
         self.loss_G.backward()
 
 
 
     def optimize_parameters(self):
         """Calculate losses, gradients, and update network weights; called in every training iteration"""
+        # self.optimizer_depth.zero_grad()
+
         # forward
         self.forward()      # compute fake images and reconstruction images.
         # G_A and G_B
         self.set_requires_grad([self.netD_B,self.netD_A,self.netD_Brec], False)  # Ds require no gradients when optimizing Gs
         self.optimizer_G.zero_grad()  # set G_A and G_B's gradients to zero
+        # if self.epoch>self.start_depth_pred_at_epoch:
+        #     self.backward_depth()
+        #     self.optimizer_depth.step()
+        self.backward_depth()
         self.backward_G()             # calculate gradients for G_A and G_B
+
         self.optimizer_G.step()       # update G_A and G_B's weights
         # D and D_B
         self.set_requires_grad([self.netD_B,self.netD_A,self.netD_Brec], True)
@@ -273,3 +312,7 @@ class CLTSGANModel(BaseModel):
         self.backward_D_Brec()      # calculate graidents for D_Brec
 
         self.optimizer_D.step()  # update D_A and D_B's weights
+
+
+
+

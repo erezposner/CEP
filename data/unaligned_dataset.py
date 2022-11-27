@@ -5,6 +5,9 @@ from PIL import Image
 import random
 import torch
 import numpy as np
+os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
+
+from newcrfs.dataloaders.dataloader import preprocessing_transforms
 
 
 class UnalignedDataset(BaseDataset):
@@ -38,7 +41,7 @@ class UnalignedDataset(BaseDataset):
         self.transform_A = get_transform(self.opt, grayscale=(input_nc == 1))
 
         self.C_size = 0
-        if self.opt.model == 'foldit':
+        if self.opt.model == 'foldit' or self.opt.model =='cltsgandepth':
             #add dataset C
             self.dir_C = os.path.join(opt.dataroot, opt.phase + 'C')  # create a path '/path/to/data/trainC'
             self.C_paths = sorted(make_dataset(self.dir_C, opt.max_dataset_size))    # load images from '/path/to/data/trainC'
@@ -75,6 +78,26 @@ class UnalignedDataset(BaseDataset):
         transform_params = get_params(self.opt, B_img.size)
         transform_B = get_transform(self.opt, transform_params, grayscale=False)
         B = transform_B(B_img)
+
+        if self.opt.model == 'cltsgandepth':
+            import cv2
+            C_path = self.C_paths[index_B]
+            MAX_DEPTH = 20
+            depth_gt = cv2.imread(C_path,-1) / MAX_DEPTH
+
+            depth_gt = Image.fromarray(depth_gt)
+            newsize = (self.opt.load_size, self.opt.load_size)
+            depth_gt = depth_gt.resize(newsize)
+            depth_transform = preprocessing_transforms('train')
+            depth_gt = np.asarray(depth_gt, dtype=np.float32).copy()
+
+            depth_gt = np.expand_dims(depth_gt, axis=2)
+            image = A_img.resize(newsize)
+            image = np.asarray(image, dtype=np.float32) / 255.0
+            #depth will be between -1 and 1 so it could be plotted appropriately
+            sample = {'image': image, 'depth': depth_gt, 'focal': 0}
+            C = depth_transform(sample)
+            return {'A': A, 'B': B, 'C': C, 'A_paths': A_path, 'B_paths': B_path, 'C_paths': C_path}
 
         if self.opt.model == 'foldit':
             C_path = self.C_paths[index_B]
